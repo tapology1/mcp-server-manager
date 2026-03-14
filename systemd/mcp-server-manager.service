@@ -1,0 +1,24 @@
+
+[Unit]
+Description=MCP Server Manager
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h
+ExecStart=/usr/local/bin/mcp-server-manager --config=%h/.config/mcp-server-manager/config.yaml
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mcp-server-manager
+
+# Basic security for user service
+PrivateTmp=true
+
+# Environment
+Environment=GIN_MODE=release
+
+[Install]
+WantedBy=multi-user.target
