@@ -1,12 +1,14 @@
-package services
+﻿package services
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	"github.com/vlazic/mcp-server-manager/internal/config"
 	"github.com/vlazic/mcp-server-manager/internal/models"
 )
@@ -30,28 +32,22 @@ func (s *ClientConfigService) ReadClientConfig(clientName string) (map[string]in
 	}
 
 	configPath := config.ExpandPath(client.ConfigPath)
+	format := s.clientFormat(client)
+
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Create empty config if file doesn't exist
-			return map[string]interface{}{
-				"mcpServers": make(map[string]interface{}),
-			}, nil
+			return s.emptyConfigForFormat(format), nil
 		}
 		return nil, fmt.Errorf("failed to read client config '%s': %w", configPath, err)
 	}
 
-	var rawConfig map[string]interface{}
-	if err := json.Unmarshal(data, &rawConfig); err != nil {
-		return nil, fmt.Errorf("failed to parse client config '%s': %w", configPath, err)
+	switch format {
+	case "toml":
+		return s.readTOMLClientConfig(configPath, data)
+	default:
+		return s.readJSONClientConfig(configPath, data)
 	}
-
-	// Initialize mcpServers if it doesn't exist
-	if rawConfig["mcpServers"] == nil {
-		rawConfig["mcpServers"] = make(map[string]interface{})
-	}
-
-	return rawConfig, nil
 }
 
 func (s *ClientConfigService) WriteClientConfig(clientName string, rawConfig map[string]interface{}) error {
@@ -61,6 +57,7 @@ func (s *ClientConfigService) WriteClientConfig(clientName string, rawConfig map
 	}
 
 	configPath := config.ExpandPath(client.ConfigPath)
+	format := s.clientFormat(client)
 
 	if err := s.backupConfig(configPath); err != nil {
 		return fmt.Errorf("failed to backup config: %w", err)
@@ -70,9 +67,22 @@ func (s *ClientConfigService) WriteClientConfig(clientName string, rawConfig map
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	data, err := json.MarshalIndent(rawConfig, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal client config: %w", err)
+	var (
+		data []byte
+		err  error
+	)
+
+	switch format {
+	case "toml":
+		data, err = toml.Marshal(rawConfig)
+		if err != nil {
+			return fmt.Errorf("failed to marshal TOML client config: %w", err)
+		}
+	default:
+		data, err = json.MarshalIndent(rawConfig, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON client config: %w", err)
+		}
 	}
 
 	if err := os.WriteFile(configPath, data, 0644); err != nil {
@@ -88,15 +98,21 @@ func (s *ClientConfigService) UpdateMCPServerStatus(clientName, serverName strin
 		return err
 	}
 
-	// Get or create mcpServers section
-	mcpServers, ok := rawConfig["mcpServers"].(map[string]interface{})
+	client := s.findClient(clientName)
+	if client == nil {
+		return fmt.Errorf("client '%s' not found", clientName)
+	}
+
+	format := s.clientFormat(client)
+	serversKey := s.serversKeyForFormat(format)
+
+	mcpServers, ok := rawConfig[serversKey].(map[string]interface{})
 	if !ok {
 		mcpServers = make(map[string]interface{})
-		rawConfig["mcpServers"] = mcpServers
+		rawConfig[serversKey] = mcpServers
 	}
 
 	if enabled {
-		// Get server config from app config
 		var serverConfig map[string]interface{}
 		found := false
 		for _, srv := range s.config.MCPServers {
@@ -110,17 +126,17 @@ func (s *ClientConfigService) UpdateMCPServerStatus(clientName, serverName strin
 			return fmt.Errorf("MCP server '%s' not found in app config", serverName)
 		}
 
-		// CRITICAL FIX: Copy the ENTIRE server config map without filtering
-		// This preserves ALL fields: type, url, httpUrl, command, args, env, headers, etc.
-		// Deep copy to avoid mutations
 		copiedConfig := make(map[string]interface{})
 		for key, value := range serverConfig {
 			copiedConfig[key] = value
 		}
 
+		if format == "toml" {
+			copiedConfig = s.translateServerConfigToTOML(copiedConfig)
+		}
+
 		mcpServers[serverName] = copiedConfig
 	} else {
-		// Remove server from client config
 		delete(mcpServers, serverName)
 	}
 
@@ -133,7 +149,13 @@ func (s *ClientConfigService) GetMCPServerStatus(clientName, serverName string) 
 		return false, err
 	}
 
-	mcpServers, ok := rawConfig["mcpServers"].(map[string]interface{})
+	client := s.findClient(clientName)
+	if client == nil {
+		return false, fmt.Errorf("client '%s' not found", clientName)
+	}
+
+	serversKey := s.serversKeyForFormat(s.clientFormat(client))
+	mcpServers, ok := rawConfig[serversKey].(map[string]interface{})
 	if !ok {
 		return false, nil
 	}
@@ -162,4 +184,78 @@ func (s *ClientConfigService) backupConfig(configPath string) error {
 	}
 
 	return os.WriteFile(backupPath, data, 0644)
+}
+
+func (s *ClientConfigService) clientFormat(client *models.Client) string {
+	format := strings.ToLower(strings.TrimSpace(client.Format))
+	if format == "" {
+		return "json"
+	}
+	return format
+}
+
+func (s *ClientConfigService) serversKeyForFormat(format string) string {
+	if format == "toml" {
+		return "mcp_servers"
+	}
+	return "mcpServers"
+}
+
+func (s *ClientConfigService) emptyConfigForFormat(format string) map[string]interface{} {
+	return map[string]interface{}{
+		s.serversKeyForFormat(format): make(map[string]interface{}),
+	}
+}
+
+func (s *ClientConfigService) readJSONClientConfig(configPath string, data []byte) (map[string]interface{}, error) {
+	var rawConfig map[string]interface{}
+	if err := json.Unmarshal(data, &rawConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse client config '%s': %w", configPath, err)
+	}
+	if rawConfig["mcpServers"] == nil {
+		rawConfig["mcpServers"] = make(map[string]interface{})
+	}
+	return rawConfig, nil
+}
+
+func (s *ClientConfigService) readTOMLClientConfig(configPath string, data []byte) (map[string]interface{}, error) {
+	var rawConfig map[string]interface{}
+	if err := toml.Unmarshal(data, &rawConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse client config '%s': %w", configPath, err)
+	}
+	if rawConfig["mcp_servers"] == nil {
+		rawConfig["mcp_servers"] = make(map[string]interface{})
+	}
+	return rawConfig, nil
+}
+
+func (s *ClientConfigService) translateServerConfigToTOML(serverConfig map[string]interface{}) map[string]interface{} {
+	translated := make(map[string]interface{})
+	for key, value := range serverConfig {
+		switch key {
+		case "httpUrl":
+			translated["url"] = value
+		case "headers":
+			translated["http_headers"] = value
+		case "type":
+			// Codex infers transport from url vs command; no direct type field needed.
+			continue
+		default:
+			translated[key] = value
+		}
+	}
+	if _, ok := translated["enabled"]; !ok {
+		translated["enabled"] = true
+	}
+	if _, hasURL := translated["url"]; hasURL {
+		if _, ok := translated["startup_timeout_sec"]; !ok {
+			translated["startup_timeout_sec"] = 20
+		}
+	}
+	if _, hasCmd := translated["command"]; hasCmd {
+		if _, ok := translated["startup_timeout_sec"]; !ok {
+			translated["startup_timeout_sec"] = 20
+		}
+	}
+	return translated
 }

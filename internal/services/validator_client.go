@@ -1,4 +1,4 @@
-package services
+﻿package services
 
 import (
 	"fmt"
@@ -15,6 +15,11 @@ func (v *ValidatorService) ValidateClient(clientName string, client *models.Clie
 
 	if client.ConfigPath == "" {
 		return fmt.Errorf("client config path cannot be empty")
+	}
+
+	format := strings.ToLower(strings.TrimSpace(client.Format))
+	if format != "" && format != "json" && format != "toml" {
+		return fmt.Errorf("client format must be json or toml")
 	}
 
 	// Don't require the directory to exist - we'll create it if needed

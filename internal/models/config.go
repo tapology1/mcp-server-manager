@@ -1,7 +1,8 @@
-package models
+﻿package models
 
-// Client represents an MCP client configuration
+// Client represents an MCP client configuration target.
 type Client struct {
+	Format     string   `yaml:"format,omitempty" json:"format,omitempty"`
 	ConfigPath string   `yaml:"config_path" json:"config_path"`
 	Enabled    []string `yaml:"enabled,omitempty" json:"enabled,omitempty"` // List of enabled server names
 }

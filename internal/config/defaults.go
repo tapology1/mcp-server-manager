@@ -1,4 +1,4 @@
-package config
+﻿package config
 
 import (
 	"fmt"
@@ -91,49 +91,32 @@ mcpServers:
       CONTEXT7_API_KEY: "ADD_YOUR_API_KEY"
       Accept: "application/json, text/event-stream"
 
-  # SSE Transport Example (uncomment to use)
-  # sse_server:
-  #   url: "http://localhost:8080/sse"
-  #   headers:
-  #     Authorization: "Bearer YOUR_TOKEN"
-  #   timeout: 15000
-
-  # Advanced STDIO Example with tool filtering
-  # git_server:
-  #   command: "npx"
-  #   args: ["@modelcontextprotocol/server-git", "--repository", "/path/to/repo"]
-  #   cwd: "/path/to/working/directory"
-  #   env:
-  #     GIT_AUTHOR_NAME: "MCP User"
-  #     GIT_AUTHOR_EMAIL: "user@example.com"
-  #   timeout: 45000
-  #   trust: false
-  #   includeTools: ["git_log", "git_diff", "git_show"]  # Only allow these tools
-  #   excludeTools: ["git_push", "git_reset"]            # Block dangerous tools
-
-# MCP Clients - Configure which servers each client uses
+# MCP Clients - Configure which targets each config file uses
 clients:
   claude_code:
+    format: json
     config_path: "~/.claude.json"
     enabled:
       - filesystem
-      # - context7-vscode
 
   gemini_cli:
+    format: json
     config_path: "~/.gemini/settings.json"
     enabled:
       # - context7-gemini
       # - filesystem
 
+  codex:
+    format: toml
+    config_path: "~/.codex/config.toml"
+    enabled:
+      # - filesystem
+
 # Notes:
-# - ALL fields in mcpServers are passed through to client configs (no filtering)
-# - Supports any MCP spec fields: type, url, httpUrl, command, args, env, headers, etc.
-# - Use 'enabled' array per client to control which servers each client uses
-# - Transport Types:
-#   * STDIO: command + args (local processes)
-#   * HTTP: url/httpUrl + headers (remote HTTP endpoints)
-#   * SSE: url + headers (Server-Sent Events)
-# - Restart service after changes: systemctl --user restart mcp-server-manager
+# - The clients section really defines output targets: format + config_path + enabled servers
+# - format defaults to json for backward compatibility
+# - Supports JSON targets (Gemini, Claude, Antigravity-style files) and TOML targets (Codex)
+# - Use 'enabled' array per target to control which servers each target uses
 `
 
 	if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {

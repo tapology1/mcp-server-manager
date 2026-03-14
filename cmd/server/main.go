@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"flag"
@@ -21,7 +21,6 @@ func main() {
 	var configShort = flag.String("c", "", "Path to config file (short form)")
 	flag.Parse()
 
-	// Use short form if provided, otherwise use long form
 	finalConfigPath := *configPath
 	if *configShort != "" {
 		finalConfigPath = *configShort
@@ -36,7 +35,6 @@ func main() {
 
 	r := gin.Default()
 
-	// Set up embedded templates
 	funcMap := template.FuncMap{
 		"dict": func(values ...interface{}) (map[string]interface{}, error) {
 			if len(values)%2 != 0 {
@@ -60,14 +58,13 @@ func main() {
 	}
 	r.SetHTMLTemplate(tmpl)
 
-	// Set up embedded static files
 	staticFS, err := fs.Sub(assets.GetStaticFS(), "web/static")
 	if err != nil {
 		log.Fatalf("Failed to create static subdirectory: %v", err)
 	}
 	r.StaticFS("/static", http.FS(staticFS))
 
-	apiHandler := handlers.NewAPIHandler(mcpManager)
+	apiHandler := handlers.NewAPIHandler(mcpManager, actualConfigPath)
 	webHandler := handlers.NewWebHandler(mcpManager)
 	configHandler := handlers.NewConfigViewerHandler(mcpManager, actualConfigPath)
 
@@ -83,6 +80,7 @@ func main() {
 		api.POST("/clients/:client/servers/:server/toggle", apiHandler.ToggleClientServer)
 		api.GET("/servers/:server", apiHandler.GetServerStatus)
 		api.POST("/sync", apiHandler.SyncAllClients)
+		api.POST("/restart", apiHandler.RestartManager)
 	}
 
 	htmx := r.Group("/htmx")
