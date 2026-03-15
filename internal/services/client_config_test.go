@@ -645,6 +645,55 @@ func TestUpdateMCPServerStatus_PreserveOtherSettings(t *testing.T) {
 	}
 }
 
+func TestSyncClientServers_ReplacesStaleServerConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	clientConfigPath := filepath.Join(tempDir, "config.toml")
+
+	cfg := &models.Config{
+		MCPServers: []models.MCPServer{
+			{
+				Name: "cloudflare",
+				Config: map[string]interface{}{
+					"type":                  "http",
+					"url":                   "https://mcp.cloudflare.com/mcp",
+					"bridge_http_via_stdio": true,
+				},
+			},
+		},
+		Clients: map[string]*models.Client{
+			"codex": {
+				Format:     "toml",
+				ConfigPath: clientConfigPath,
+				Enabled:    []string{"cloudflare"},
+			},
+		},
+	}
+
+	service := NewClientConfigService(cfg)
+
+	initial := []byte("[mcp_servers.cloudflare]\nargs = ['-y', 'mcp-remote', 'https://mcp.cloudflare.com/mcp', '--header', 'Authorization: Bearer stale']\ncommand = 'npx'\nenabled = true\nstartup_timeout_sec = 180\n")
+	if err := os.WriteFile(clientConfigPath, initial, 0644); err != nil {
+		t.Fatalf("Failed to seed TOML config: %v", err)
+	}
+
+	if err := service.SyncClientServers("codex", []string{"cloudflare"}); err != nil {
+		t.Fatalf("SyncClientServers failed: %v", err)
+	}
+
+	data, err := os.ReadFile(clientConfigPath)
+	if err != nil {
+		t.Fatalf("Failed to read synced TOML config: %v", err)
+	}
+
+	text := string(data)
+	if strings.Contains(text, "Authorization: Bearer stale") {
+		t.Fatal("stale bearer header should have been removed during sync")
+	}
+	if !strings.Contains(text, "mcp.cloudflare.com/mcp") {
+		t.Fatal("cloudflare server should remain in synced config")
+	}
+}
+
 func TestTranslateServerConfigToTOML_BridgeHTTPViaStdio(t *testing.T) {
 	service, _ := setupClientConfigTest(t, []models.MCPServer{}, []string{})
 
@@ -687,5 +736,24 @@ func TestTranslateServerConfigToTOML_BridgeHTTPViaStdio(t *testing.T) {
 
 	if _, exists := translated["http_headers"]; exists {
 		t.Fatal("bridge config should not emit direct http_headers")
+	}
+
+	if translated["startup_timeout_sec"] != 20 {
+		t.Fatalf("expected default startup timeout 20, got %#v", translated["startup_timeout_sec"])
+	}
+}
+
+func TestTranslateServerConfigToTOML_BridgePreservesConfiguredTimeout(t *testing.T) {
+	service, _ := setupClientConfigTest(t, []models.MCPServer{}, []string{})
+
+	translated := service.translateServerConfigToTOML(map[string]interface{}{
+		"type":                  "http",
+		"url":                   "https://mcp.cloudflare.com/mcp",
+		"bridge_http_via_stdio": true,
+		"startup_timeout_sec":   180,
+	})
+
+	if translated["startup_timeout_sec"] != 180 {
+		t.Fatalf("expected startup timeout 180, got %#v", translated["startup_timeout_sec"])
 	}
 }

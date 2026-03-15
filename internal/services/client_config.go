@@ -144,6 +144,47 @@ func (s *ClientConfigService) UpdateMCPServerStatus(clientName, serverName strin
 	return s.WriteClientConfig(clientName, rawConfig)
 }
 
+func (s *ClientConfigService) SyncClientServers(clientName string, enabledServers []string) error {
+	rawConfig, err := s.ReadClientConfig(clientName)
+	if err != nil {
+		return err
+	}
+
+	client := s.findClient(clientName)
+	if client == nil {
+		return fmt.Errorf("client '%s' not found", clientName)
+	}
+
+	format := s.clientFormat(client)
+	serversKey := s.serversKeyForFormat(format)
+	desiredServers := make(map[string]interface{})
+
+	enabledSet := make(map[string]bool)
+	for _, serverName := range enabledServers {
+		enabledSet[serverName] = true
+	}
+
+	for _, srv := range s.config.MCPServers {
+		if !enabledSet[srv.Name] {
+			continue
+		}
+
+		copiedConfig := make(map[string]interface{})
+		for key, value := range srv.Config {
+			copiedConfig[key] = value
+		}
+
+		if format == "toml" {
+			copiedConfig = s.translateServerConfigToTOML(copiedConfig)
+		}
+
+		desiredServers[srv.Name] = copiedConfig
+	}
+
+	rawConfig[serversKey] = desiredServers
+	return s.WriteClientConfig(clientName, rawConfig)
+}
+
 func (s *ClientConfigService) GetMCPServerStatus(clientName, serverName string) (bool, error) {
 	rawConfig, err := s.ReadClientConfig(clientName)
 	if err != nil {
@@ -295,11 +336,23 @@ func bridgeHTTPServerConfigToTOML(serverConfig map[string]interface{}) map[strin
 		}
 	}
 
+	startupTimeout := 20
+	if configured, ok := serverConfig["startup_timeout_sec"]; ok {
+		switch v := configured.(type) {
+		case int:
+			startupTimeout = v
+		case int64:
+			startupTimeout = int(v)
+		case float64:
+			startupTimeout = int(v)
+		}
+	}
+
 	return map[string]interface{}{
 		"command":             "npx",
 		"args":                args,
 		"enabled":             true,
-		"startup_timeout_sec": 20,
+		"startup_timeout_sec": startupTimeout,
 	}
 }
 

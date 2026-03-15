@@ -90,18 +90,8 @@ func (s *MCPManagerService) GetServerStatus(serverName string) (map[string]inter
 // SyncAllClients synchronizes all client configurations based on enabled lists
 func (s *MCPManagerService) SyncAllClients() error {
 	for clientName, client := range s.config.Clients {
-		// Build set of enabled servers for quick lookup
-		enabledSet := make(map[string]bool)
-		for _, serverName := range client.Enabled {
-			enabledSet[serverName] = true
-		}
-
-		// Sync each server in the config
-		for _, srv := range s.config.MCPServers {
-			enabled := enabledSet[srv.Name]
-			if err := s.clientConfigService.UpdateMCPServerStatus(clientName, srv.Name, enabled); err != nil {
-				return fmt.Errorf("failed to sync client '%s': %w", clientName, err)
-			}
+		if err := s.clientConfigService.SyncClientServers(clientName, client.Enabled); err != nil {
+			return fmt.Errorf("failed to sync client '%s': %w", clientName, err)
 		}
 	}
 	return nil
