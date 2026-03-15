@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -641,5 +642,50 @@ func TestUpdateMCPServerStatus_PreserveOtherSettings(t *testing.T) {
 	}
 	if rawConfig["settings"] == nil {
 		t.Error("Settings section not preserved")
+	}
+}
+
+func TestTranslateServerConfigToTOML_BridgeHTTPViaStdio(t *testing.T) {
+	service, _ := setupClientConfigTest(t, []models.MCPServer{}, []string{})
+
+	translated := service.translateServerConfigToTOML(map[string]interface{}{
+		"type":                  "http",
+		"url":                   "https://mcp.cloudflare.com/mcp",
+		"bridge_http_via_stdio": true,
+		"headers": map[string]interface{}{
+			"Authorization": "Bearer token",
+			"Accept":        "application/json",
+		},
+	})
+
+	if translated["command"] != "npx" {
+		t.Fatalf("expected npx command, got %#v", translated["command"])
+	}
+
+	expectedArgs := []string{
+		"-y",
+		"mcp-remote",
+		"https://mcp.cloudflare.com/mcp",
+		"--header",
+		"Accept: application/json",
+		"--header",
+		"Authorization: Bearer token",
+	}
+
+	args, ok := translated["args"].([]string)
+	if !ok {
+		t.Fatalf("expected []string args, got %T", translated["args"])
+	}
+
+	if !reflect.DeepEqual(args, expectedArgs) {
+		t.Fatalf("unexpected args: %#v", args)
+	}
+
+	if _, exists := translated["url"]; exists {
+		t.Fatal("bridge config should not emit direct url")
+	}
+
+	if _, exists := translated["http_headers"]; exists {
+		t.Fatal("bridge config should not emit direct http_headers")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -230,6 +231,10 @@ func (s *ClientConfigService) readTOMLClientConfig(configPath string, data []byt
 }
 
 func (s *ClientConfigService) translateServerConfigToTOML(serverConfig map[string]interface{}) map[string]interface{} {
+	if shouldBridgeHTTPViaStdio(serverConfig) {
+		return bridgeHTTPServerConfigToTOML(serverConfig)
+	}
+
 	translated := make(map[string]interface{})
 	for key, value := range serverConfig {
 		switch key {
@@ -239,6 +244,86 @@ func (s *ClientConfigService) translateServerConfigToTOML(serverConfig map[strin
 			translated["http_headers"] = value
 		case "type":
 			// Codex infers transport from url vs command; no direct type field needed.
+			continue
+		default:
+			translated[key] = value
+		}
+	}
+	if _, ok := translated["enabled"]; !ok {
+		translated["enabled"] = true
+	}
+	if _, hasURL := translated["url"]; hasURL {
+		if _, ok := translated["startup_timeout_sec"]; !ok {
+			translated["startup_timeout_sec"] = 20
+		}
+	}
+	if _, hasCmd := translated["command"]; hasCmd {
+		if _, ok := translated["startup_timeout_sec"]; !ok {
+			translated["startup_timeout_sec"] = 20
+		}
+	}
+	return translated
+}
+
+func shouldBridgeHTTPViaStdio(serverConfig map[string]interface{}) bool {
+	value, ok := serverConfig["bridge_http_via_stdio"]
+	if !ok {
+		return false
+	}
+
+	flag, ok := value.(bool)
+	return ok && flag
+}
+
+func bridgeHTTPServerConfigToTOML(serverConfig map[string]interface{}) map[string]interface{} {
+	url, ok := httpServerURL(serverConfig)
+	if !ok {
+		return defaultTOMLServerConfig(serverConfig)
+	}
+
+	args := []string{"-y", "mcp-remote", url}
+
+	if headers, ok := serverConfig["headers"].(map[string]interface{}); ok {
+		keys := make([]string, 0, len(headers))
+		for key := range headers {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+
+		for _, key := range keys {
+			args = append(args, "--header", fmt.Sprintf("%s: %v", key, headers[key]))
+		}
+	}
+
+	return map[string]interface{}{
+		"command":             "npx",
+		"args":                args,
+		"enabled":             true,
+		"startup_timeout_sec": 20,
+	}
+}
+
+func httpServerURL(serverConfig map[string]interface{}) (string, bool) {
+	if url, ok := serverConfig["url"].(string); ok && strings.TrimSpace(url) != "" {
+		return url, true
+	}
+
+	if httpURL, ok := serverConfig["httpUrl"].(string); ok && strings.TrimSpace(httpURL) != "" {
+		return httpURL, true
+	}
+
+	return "", false
+}
+
+func defaultTOMLServerConfig(serverConfig map[string]interface{}) map[string]interface{} {
+	translated := make(map[string]interface{})
+	for key, value := range serverConfig {
+		switch key {
+		case "httpUrl":
+			translated["url"] = value
+		case "headers":
+			translated["http_headers"] = value
+		case "type", "bridge_http_via_stdio":
 			continue
 		default:
 			translated[key] = value
