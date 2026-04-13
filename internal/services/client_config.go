@@ -1,4 +1,4 @@
-﻿package services
+package services
 
 import (
 	"encoding/json"
@@ -127,16 +127,7 @@ func (s *ClientConfigService) UpdateMCPServerStatus(clientName, serverName strin
 			return fmt.Errorf("MCP server '%s' not found in app config", serverName)
 		}
 
-		copiedConfig := make(map[string]interface{})
-		for key, value := range serverConfig {
-			copiedConfig[key] = value
-		}
-
-		if format == "toml" {
-			copiedConfig = s.translateServerConfigToTOML(copiedConfig)
-		}
-
-		mcpServers[serverName] = copiedConfig
+		mcpServers[serverName] = s.prepareServerConfigForClient(clientName, client, serverConfig)
 	} else {
 		delete(mcpServers, serverName)
 	}
@@ -169,16 +160,7 @@ func (s *ClientConfigService) SyncClientServers(clientName string, enabledServer
 			continue
 		}
 
-		copiedConfig := make(map[string]interface{})
-		for key, value := range srv.Config {
-			copiedConfig[key] = value
-		}
-
-		if format == "toml" {
-			copiedConfig = s.translateServerConfigToTOML(copiedConfig)
-		}
-
-		desiredServers[srv.Name] = copiedConfig
+		desiredServers[srv.Name] = s.prepareServerConfigForClient(clientName, client, srv.Config)
 	}
 
 	rawConfig[serversKey] = desiredServers
@@ -247,6 +229,27 @@ func (s *ClientConfigService) emptyConfigForFormat(format string) map[string]int
 	return map[string]interface{}{
 		s.serversKeyForFormat(format): make(map[string]interface{}),
 	}
+}
+
+func (s *ClientConfigService) prepareServerConfigForClient(clientName string, client *models.Client, serverConfig map[string]interface{}) map[string]interface{} {
+	prepared := make(map[string]interface{}, len(serverConfig))
+	for key, value := range serverConfig {
+		prepared[key] = value
+	}
+
+	if s.clientRejectsStartupTimeout(clientName, client) {
+		delete(prepared, "startup_timeout_sec")
+	}
+
+	if s.clientFormat(client) == "toml" {
+		return s.translateServerConfigToTOML(prepared)
+	}
+
+	return prepared
+}
+
+func (s *ClientConfigService) clientRejectsStartupTimeout(clientName string, client *models.Client) bool {
+	return s.clientFormat(client) == "json" && strings.EqualFold(strings.TrimSpace(clientName), "gemini_cli")
 }
 
 func (s *ClientConfigService) readJSONClientConfig(configPath string, data []byte) (map[string]interface{}, error) {

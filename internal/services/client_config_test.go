@@ -281,6 +281,51 @@ func TestUpdateMCPServerStatus(t *testing.T) {
 	})
 }
 
+func TestUpdateMCPServerStatus_GeminiJSONOmitsStartupTimeout(t *testing.T) {
+	tempDir := t.TempDir()
+	clientConfigPath := filepath.Join(tempDir, "settings.json")
+
+	cfg := &models.Config{
+		MCPServers: []models.MCPServer{
+			{
+				Name: testutil.TestServerName,
+				Config: map[string]interface{}{
+					"command":             "npx",
+					"args":                []interface{}{"test"},
+					"startup_timeout_sec": 180,
+				},
+			},
+		},
+		Clients: map[string]*models.Client{
+			"gemini_cli": {
+				Format:     "json",
+				ConfigPath: clientConfigPath,
+			},
+		},
+	}
+
+	service := NewClientConfigService(cfg)
+
+	if err := service.UpdateMCPServerStatus("gemini_cli", testutil.TestServerName, true); err != nil {
+		t.Fatalf("UpdateMCPServerStatus failed: %v", err)
+	}
+
+	rawConfig, err := service.ReadClientConfig("gemini_cli")
+	if err != nil {
+		t.Fatalf("ReadClientConfig failed: %v", err)
+	}
+
+	mcpServers := rawConfig["mcpServers"].(map[string]interface{})
+	serverConfig := mcpServers[testutil.TestServerName].(map[string]interface{})
+
+	if _, exists := serverConfig["startup_timeout_sec"]; exists {
+		t.Fatal("gemini_cli config should omit startup_timeout_sec")
+	}
+	if serverConfig["command"] != "npx" {
+		t.Fatalf("expected command to be preserved, got %#v", serverConfig["command"])
+	}
+}
+
 func TestGetMCPServerStatus(t *testing.T) {
 	servers := []models.MCPServer{
 		{
@@ -691,6 +736,56 @@ func TestSyncClientServers_ReplacesStaleServerConfig(t *testing.T) {
 	}
 	if !strings.Contains(text, "mcp.cloudflare.com/mcp") {
 		t.Fatal("cloudflare server should remain in synced config")
+	}
+}
+
+func TestSyncClientServers_GeminiJSONOmitsStartupTimeout(t *testing.T) {
+	tempDir := t.TempDir()
+	clientConfigPath := filepath.Join(tempDir, "settings.json")
+
+	cfg := &models.Config{
+		MCPServers: []models.MCPServer{
+			{
+				Name: testutil.TestServerName,
+				Config: map[string]interface{}{
+					"command":             "npx",
+					"args":                []interface{}{"test"},
+					"startup_timeout_sec": 120,
+				},
+			},
+		},
+		Clients: map[string]*models.Client{
+			"gemini_cli": {
+				Format:     "json",
+				ConfigPath: clientConfigPath,
+			},
+		},
+	}
+
+	service := NewClientConfigService(cfg)
+
+	if err := service.SyncClientServers("gemini_cli", []string{testutil.TestServerName}); err != nil {
+		t.Fatalf("SyncClientServers failed: %v", err)
+	}
+
+	data, err := os.ReadFile(clientConfigPath)
+	if err != nil {
+		t.Fatalf("failed to read synced config: %v", err)
+	}
+
+	var rawConfig map[string]interface{}
+	if err := json.Unmarshal(data, &rawConfig); err != nil {
+		t.Fatalf("failed to parse synced config: %v", err)
+	}
+
+	mcpServers := rawConfig["mcpServers"].(map[string]interface{})
+	serverConfig := mcpServers[testutil.TestServerName].(map[string]interface{})
+
+	if _, exists := serverConfig["startup_timeout_sec"]; exists {
+		t.Fatal("gemini_cli sync should omit startup_timeout_sec")
+	}
+	if serverConfig["command"] != "npx" {
+		t.Fatalf("expected command to be preserved, got %#v", serverConfig["command"])
 	}
 }
 

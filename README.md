@@ -82,6 +82,11 @@ On first run, a default configuration will be automatically created at:
 
 Edit this file to configure your MCP servers and client paths.
 
+If you are setting up from this repository, start from the tracked example and keep your real machine config local:
+```bash
+cp configs/config.example.yaml ~/.config/mcp-server-manager/config.yaml
+```
+
 ## How It Works
 
 1. **Configure once** - Add servers via web UI or edit the auto-created config file
@@ -99,6 +104,8 @@ Edit this file to configure your MCP servers and client paths.
 
 ### Option 2: Edit Configuration File
 Manually edit `~/.config/mcp-server-manager/config.yaml` and restart the service.
+
+The repository keeps only `configs/config.example.yaml`. Do not commit your real `config.yaml` with machine-specific paths or secrets.
 
 ## Example Configuration
 

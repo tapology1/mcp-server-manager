@@ -55,4 +55,6 @@ temp/
 checksums.txt
 
 # Local development configs (keep the template)
+configs/config.yaml
+configs/*.local.yaml
 configs/local.yaml
